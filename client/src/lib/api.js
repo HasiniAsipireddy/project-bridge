@@ -17,7 +17,13 @@ export async function apiFetch(path, options = {}) {
   const body = response.status === 204 ? null : await response.json();
 
   if (!response.ok) {
-    throw new Error(body?.error ?? `Request failed with status ${response.status}`);
+    // Callers need the status to tell apart cases that aren't really failures —
+    // a 409 on a join request means "already requested", a 404 means the
+    // project is gone — so carry it on the error rather than only the message.
+    const error = new Error(body?.error ?? `Request failed with status ${response.status}`);
+    error.status = response.status;
+    error.body = body;
+    throw error;
   }
 
   return body;

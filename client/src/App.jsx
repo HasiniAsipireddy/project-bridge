@@ -11,6 +11,7 @@ import { ProjectDetail } from './pages/ProjectDetail'
 import { ProjectList } from './pages/ProjectList'
 import { Register } from './pages/Register'
 import './App.css'
+import './styles.css'
 
 function App() {
   return (
