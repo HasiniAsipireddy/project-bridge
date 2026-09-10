@@ -31,6 +31,12 @@ model User {
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
 
+  // Student profile. Only meaningful for the student role; innovators keep the
+  // defaults. URLs are validated in zod, not here.
+  bio           String?
+  skills        String[] @default([])
+  project_links String[] @default([])
+
   // Projects this user owns — only meaningful for innovators.
   projects Project[] @relation("ProjectOwner")
   // Requests this user has sent — only meaningful for students.

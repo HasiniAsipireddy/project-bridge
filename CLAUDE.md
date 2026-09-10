@@ -44,6 +44,9 @@ cd client && npm run dev        # vite
 - `RequestStatus` — `pending` | `accepted` | `rejected`
 
 **User** — `id`, `email` (unique), `name`, `password_hash`, `role`, timestamps
+- Student profile: `bio` (nullable), `skills` (`text[]`), `project_links`
+  (`text[]`) — both arrays default to `[]`. Only meaningful for students;
+  innovators keep the defaults. URL validity is enforced in zod, not the DB.
 - `projects` (as owner), `requests` (as student)
 
 **Project** — `id`, `title`, `description`, `tech_stack` (Postgres `text[]`),
@@ -61,7 +64,8 @@ cd client && npm run dev        # vite
 All three FKs are `ON DELETE CASCADE` — deleting a project clears its requests;
 deleting a user clears their projects and requests.
 
-Migrations applied: `20260910025012_init`, `20260910155550_add_tech_stack`.
+Migrations applied: `20260910025012_init`, `20260910155550_add_tech_stack`,
+`20260910185421_add_profile_fields`.
 
 ## Neon connection setup
 
@@ -119,6 +123,8 @@ order in `app.js` matters — keep `projectsRouter` before the `/api` mount.
 | POST | `/api/auth/login` | public | Verify credentials, set cookie |
 | POST | `/api/auth/logout` | public | Clear the cookie (204) |
 | GET | `/api/auth/me` | auth | Current user `{id, name, email, role}` |
+| GET | `/api/users/me/profile` | auth | Own profile incl. `bio`, `skills`, `project_links` |
+| PATCH | `/api/users/me/profile` | student | Update `bio` / `skills` / `project_links` |
 | GET | `/api/projects` | public | All projects, newest first, with owner `{id, name}` |
 | GET | `/api/projects/:id` | public | One project + owner + `request_count` |
 | POST | `/api/projects` | innovator | Create; owner is `req.user.id` |
@@ -163,16 +169,16 @@ Done:
 4. Projects + requests routers (full CRUD, ownership checks, `tech_stack`)
 5. Client shell — router, `AuthProvider`, `ProtectedRoute`, `Nav`
 6. Client pages — ProjectList, ProjectDetail, Dashboard, MyRequests
+7. Student profile fields + `/api/users/me/profile` routes (server only — no
+   client UI for editing a profile yet)
 
 Next:
-7. S3 uploads (resumes, portfolio files, avatars)
-8. SES emails (request notifications)
-9. Deployment
+8. S3 uploads (resumes, portfolio files, avatars)
+9. SES emails (request notifications)
+10. Deployment
 
 ## Not built yet (referenced in earlier drafts)
 
-- **Student profiles** — `User` has no `bio`, `skills[]`, or `project_links[]`.
-  Adding them needs a migration.
 - **Project status** — `Project` has no `status` field; only `Request` has one.
 - **"My projects" endpoint** — `Dashboard` fetches `GET /api/projects` and filters
   by `owner_id` client-side. Fine at this size; add `?owner=me` if the list grows.
