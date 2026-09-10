@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  innovator
+  student
+}
+
+enum RequestStatus {
+  pending
+  accepted
+  rejected
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  name          String
+  password_hash String
+  role          Role
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  // Projects this user owns — only meaningful for innovators.
+  projects Project[] @relation("ProjectOwner")
+  // Requests this user has sent — only meaningful for students.
+  requests Request[] @relation("RequestStudent")
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  owner_id    String
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  owner    User      @relation("ProjectOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  requests Request[]
+
+  @@index([owner_id])
+}
+
+model Request {
+  id         String        @id @default(uuid())
+  student_id String
+  project_id String
+  status     RequestStatus @default(pending)
+  message    String?
+  created_at DateTime      @default(now())
+  updated_at DateTime      @updatedAt
+
+  student User    @relation("RequestStudent", fields: [student_id], references: [id], onDelete: Cascade)
+  project Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  // A student may only have one request per project.
+  @@unique([student_id, project_id])
+  @@index([project_id])
+  @@index([student_id])
+}
