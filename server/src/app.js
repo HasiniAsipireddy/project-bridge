@@ -6,6 +6,8 @@ import morgan from 'morgan';
 import { env } from './config/env.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { authRouter } from './routes/auth.js';
+import { projectsRouter } from './routes/projects.js';
+import { requestsRouter } from './routes/requests.js';
 
 export function createApp() {
   const app = express();
@@ -17,7 +19,11 @@ export function createApp() {
   app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'dev'));
 
   app.use('/api/auth', authRouter);
-  // Further routers mount here, e.g. app.use('/api/projects', projectsRouter)
+  app.use('/api/projects', projectsRouter);
+  // Mounted at /api because its paths straddle /projects/:id/requests,
+  // /requests/:id and /my-requests. Unmatched /api/projects/* requests fall
+  // through from projectsRouter to here.
+  app.use('/api', requestsRouter);
 
   app.use(notFound);
   app.use(errorHandler);

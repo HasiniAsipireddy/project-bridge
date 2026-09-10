@@ -10,9 +10,13 @@ export function validateBody(schema) {
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
+      const { fieldErrors, formErrors } = flattenError(result.error);
       return res.status(400).json({
         error: 'Validation failed',
-        fields: flattenError(result.error).fieldErrors,
+        fields: fieldErrors,
+        // Whole-body errors from .refine() land here rather than on a field;
+        // without this they would be dropped and the 400 would say nothing.
+        ...(formErrors.length ? { form: formErrors } : {}),
       });
     }
 
