@@ -80,6 +80,25 @@ authRouter.post('/logout', (req, res) => {
   return res.status(204).end();
 });
 
-authRouter.get('/me', requireAuth, (req, res) => {
-  return res.json({ user: req.user });
+authRouter.get('/me', requireAuth, async (req, res, next) => {
+  try {
+    // Read through to the row rather than echoing the JWT, so the response
+    // matches login/register and reflects edits made since the token was
+    // issued. `select` keeps password_hash out at the query level.
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, email: true, role: true },
+    });
+
+    if (!user) {
+      // Validly signed token for an account that no longer exists. Drop the
+      // cookie so the client stops presenting it.
+      clearAuthCookie(res);
+      return res.status(401).json({ error: 'Invalid or expired session' });
+    }
+
+    return res.json({ user });
+  } catch (err) {
+    return next(err);
+  }
 });
