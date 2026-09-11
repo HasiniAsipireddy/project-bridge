@@ -8,6 +8,7 @@ import { errorHandler, notFound } from './middleware/errorHandler.js';
 import { authRouter } from './routes/auth.js';
 import { projectsRouter } from './routes/projects.js';
 import { requestsRouter } from './routes/requests.js';
+import { uploadsRouter } from './routes/uploads.js';
 import { usersRouter } from './routes/users.js';
 
 export function createApp() {
@@ -21,6 +22,7 @@ export function createApp() {
 
   app.use('/api/auth', authRouter);
   app.use('/api/users', usersRouter);
+  app.use('/api/uploads', uploadsRouter);
   app.use('/api/projects', projectsRouter);
   // Mounted at /api because its paths straddle /projects/:id/requests,
   // /requests/:id and /my-requests. Unmatched /api/projects/* requests fall

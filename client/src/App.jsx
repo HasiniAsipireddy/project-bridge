@@ -9,6 +9,7 @@ import { MyRequests } from './pages/MyRequests'
 import { NotFound } from './pages/NotFound'
 import { ProjectDetail } from './pages/ProjectDetail'
 import { ProjectList } from './pages/ProjectList'
+import { Profile } from './pages/Profile'
 import { Register } from './pages/Register'
 import './App.css'
 import './styles.css'
@@ -38,6 +39,14 @@ function App() {
               element={
                 <ProtectedRoute role="student">
                   <MyRequests />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute role="student">
+                  <Profile />
                 </ProtectedRoute>
               }
             />

@@ -37,6 +37,11 @@ model User {
   skills        String[] @default([])
   project_links String[] @default([])
 
+  // S3 object keys, not URLs — the objects are private, so reads go out as
+  // short-lived presigned URLs generated per request. Null until first upload.
+  resume_key          String?
+  profile_picture_key String?
+
   // Projects this user owns — only meaningful for innovators.
   projects Project[] @relation("ProjectOwner")
   // Requests this user has sent — only meaningful for students.

@@ -35,6 +35,7 @@ export function Nav() {
         <>
           {user.role === 'innovator' && <Link to="/dashboard">Dashboard</Link>}
           {user.role === 'student' && <Link to="/my-requests">My Requests</Link>}
+          {user.role === 'student' && <Link to="/profile">Profile</Link>}
           <span style={styles.spacer} data-testid="nav-role">
             {user.role}
           </span>

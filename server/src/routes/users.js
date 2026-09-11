@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
+import { env } from '../config/env.js';
 import { prisma } from '../lib/prisma.js';
+import { getPresignedUrl } from '../lib/s3.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireRole } from '../middleware/requireRole.js';
 import { validateBody } from '../middleware/validate.js';
@@ -15,7 +17,31 @@ const profileSelect = {
   bio: true,
   skills: true,
   project_links: true,
+  resume_key: true,
+  profile_picture_key: true,
 };
+
+/**
+ * Swap the stored S3 keys for short-lived presigned GET URLs. The bucket is
+ * private and the keys are an implementation detail, so neither one leaves the
+ * server; the client only ever sees a URL that expires.
+ */
+async function toProfileResponse(user) {
+  const { resume_key, profile_picture_key, ...profile } = user;
+
+  const [resumeUrl, pictureUrl] = await Promise.all([
+    getPresignedUrl(resume_key),
+    getPresignedUrl(profile_picture_key),
+  ]);
+
+  return {
+    ...profile,
+    resume_url: resumeUrl,
+    profile_picture_url: pictureUrl,
+    // Lets the client know when to refetch rather than render a dead link.
+    upload_url_expires_in: env.s3UrlExpiresIn,
+  };
+}
 
 const updateProfileSchema = z
   .object({
@@ -43,7 +69,7 @@ usersRouter.get('/me/profile', requireAuth, async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid or expired session' });
     }
 
-    return res.json({ profile: user });
+    return res.json({ profile: await toProfileResponse(user) });
   } catch (err) {
     return next(err);
   }
@@ -64,7 +90,7 @@ usersRouter.patch(
         select: profileSelect,
       });
 
-      return res.json({ profile: user });
+      return res.json({ profile: await toProfileResponse(user) });
     } catch (err) {
       // Token valid but the account is gone.
       if (err.code === 'P2025') {

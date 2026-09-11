@@ -13,10 +13,11 @@ requests; innovators accept or reject them.
 | Database | PostgreSQL on **Neon**, Prisma 6 |
 | Auth | JWT in an httpOnly cookie, bcrypt (cost 12) |
 | Validation | zod 4 (server-side, via `validateBody`) |
+| Uploads | multer (memory storage) → AWS S3, SDK v3 |
 | Lint | oxlint (client only) |
 
-Planned, not built: AWS S3 (resumes, portfolio files, avatars), AWS SES (request
-notifications), deployment target undecided.
+Planned, not built: AWS SES (request notifications), deployment target
+undecided.
 
 ## Dev commands
 
@@ -47,6 +48,8 @@ cd client && npm run dev        # vite
 - Student profile: `bio` (nullable), `skills` (`text[]`), `project_links`
   (`text[]`) — both arrays default to `[]`. Only meaningful for students;
   innovators keep the defaults. URL validity is enforced in zod, not the DB.
+- Upload pointers: `resume_key`, `profile_picture_key` (both nullable). They
+  hold **S3 object keys, not URLs** — see "File uploads (S3)".
 - `projects` (as owner), `requests` (as student)
 
 **Project** — `id`, `title`, `description`, `tech_stack` (Postgres `text[]`),
@@ -65,7 +68,7 @@ All three FKs are `ON DELETE CASCADE` — deleting a project clears its requests
 deleting a user clears their projects and requests.
 
 Migrations applied: `20260910025012_init`, `20260910155550_add_tech_stack`,
-`20260910185421_add_profile_fields`.
+`20260910185421_add_profile_fields`, `20260911110654_add_upload_keys`.
 
 ## Neon connection setup
 
@@ -106,6 +109,59 @@ leave migration state inconsistent. **Never point migrate at the pooled URL.**
 - Login compares against a dummy hash for unknown emails so response timing
   doesn't reveal which addresses are registered.
 
+## File uploads (S3)
+
+`server/src/routes/uploads.js`, mounted at `/api/uploads`. Both endpoints are
+`requireAuth` + `requireRole('student')` and write to `req.user.id`'s row only,
+so there is no path to another student's profile through them.
+
+**The bucket is private.** What we persist is the S3 object *key*
+(`User.resume_key`, `User.profile_picture_key`); nothing ever stores or returns
+a permanent public URL. Reads are served as presigned GET URLs generated per
+request, valid for `S3_URL_EXPIRES_IN` seconds (default 3600), so access to a
+resume dies with the signature. `GET /api/users/me/profile` swaps the keys for
+`resume_url` / `profile_picture_url` on the way out — the keys themselves never
+leave the server.
+
+**Key naming:** `{prefix}/{userId}-{timestamp}{ext}`, e.g.
+`resumes/9f1c…-1789125076807.pdf`, `profile-pictures/9f1c…-1789125079776.png`.
+The user id scopes the object; the timestamp means a re-upload writes a new
+object rather than overwriting the old one.
+
+| Endpoint | Prefix | Max size | Accepted |
+|---|---|---|---|
+| `POST /api/uploads/resume` | `resumes/` | 5MB | `.pdf` + `application/pdf` |
+| `POST /api/uploads/profile-picture` | `profile-pictures/` | 2MB | `.jpg`/`.jpeg`/`.png` + `image/jpeg`/`image/png` |
+
+Both take `multipart/form-data` with a single field named **`file`** and answer
+`201 { <field>_url, key, filename, size, expires_in }`.
+
+Validation runs in three passes, because the client controls both the filename
+and the `Content-Type` header and neither is evidence on its own:
+
+1. multer's own `limits.fileSize` aborts an oversized stream early;
+2. zod checks the MIME type and size, extension is matched against the MIME
+   type it must pair with (a `.png` announced as `application/pdf` is a spoof,
+   not a typo);
+3. the leading bytes are compared against the format's signature (`%PDF`,
+   `\xFF\xD8\xFF`, `\x89PNG`).
+
+Any failure is a `400 { error: 'Validation failed', fields: { … } }`, matching
+`validateBody`'s shape — multipart bodies can't go through `validateBody`
+itself. Uploads use `multer.memoryStorage()` and the buffer goes straight to
+`PutObjectCommand`; nothing is written to disk.
+
+S3 comes first, the DB write second. A failed `PutObjectCommand` returns 500
+and leaves the row untouched, so a profile never points at a key that isn't
+there. (The reverse gap — a DB failure after a successful put — leaves an
+unreferenced object in the bucket, which is harmless; a lifecycle rule is the
+place to sweep those.)
+
+Env: `AWS_REGION`, `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+optional `S3_URL_EXPIRES_IN` — all read through `config/env.js`, all `required()`
+except the last, so a misconfigured bucket fails at boot rather than on first
+upload.
+
 ## Routing quirk
 
 `requestsRouter` is mounted at **`/api`**, not `/api/projects`, because its paths
@@ -123,8 +179,10 @@ order in `app.js` matters — keep `projectsRouter` before the `/api` mount.
 | POST | `/api/auth/login` | public | Verify credentials, set cookie |
 | POST | `/api/auth/logout` | public | Clear the cookie (204) |
 | GET | `/api/auth/me` | auth | Current user `{id, name, email, role}` |
-| GET | `/api/users/me/profile` | auth | Own profile incl. `bio`, `skills`, `project_links` |
+| GET | `/api/users/me/profile` | auth | Own profile incl. `bio`, `skills`, `project_links`, presigned `resume_url` / `profile_picture_url` |
 | PATCH | `/api/users/me/profile` | student | Update `bio` / `skills` / `project_links` |
+| POST | `/api/uploads/resume` | student | Upload a PDF resume (multipart, field `file`) |
+| POST | `/api/uploads/profile-picture` | student | Upload a JPG/PNG avatar (multipart, field `file`) |
 | GET | `/api/projects` | public | All projects, newest first, with owner `{id, name}` |
 | GET | `/api/projects/:id` | public | One project + owner + `request_count` |
 | POST | `/api/projects` | innovator | Create; owner is `req.user.id` |
@@ -147,17 +205,22 @@ Notes:
 **Server** (`server/src/`)
 - `routes/` — one router per resource; handlers live inline, no controllers layer
 - `middleware/` — `requireAuth`, `requireRole`, `validate` (`validateBody`), `errorHandler`
-- `lib/` — `prisma.js` (singleton client), `token.js` (sign/verify + cookie helpers)
+- `lib/` — `prisma.js` (singleton client), `token.js` (sign/verify + cookie
+  helpers), `s3.js` (singleton `S3Client`, `buildKey`, `putObject`,
+  `getPresignedUrl`)
 - `config/env.js` — all env access; `required()` fails fast at boot
 - `app.js` builds the app, `index.js` listens and handles shutdown
 
 **Client** (`client/src/`)
 - `pages/` — one per route
-- `components/` — shared UI (`Nav`, `ProtectedRoute`)
+- `components/` — shared UI (`Nav`, `ProtectedRoute`, `FileUpload`)
 - `context/AuthContext.jsx` — `AuthProvider` only (component-only file, or Vite
   fast refresh breaks)
-- `hooks/` — `useAuth` (holds the context object too), `useApi` (loading/error/data)
-- `lib/api.js` — `apiFetch`; throws on non-2xx with `.status` and `.body` attached
+- `hooks/` — `useAuth` (holds the context object too), `useApi` (loading/error/data),
+  `useUpload` (multipart POST of one file)
+- `lib/api.js` — `apiFetch`; throws on non-2xx with `.status` and `.body` attached.
+  Sets `Content-Type: application/json` **unless** the body is `FormData`, whose
+  multipart boundary the browser must set itself.
 - `styles.css` — app styles. `App.css` is the original template CSS; leave it alone.
 
 ## Build order
@@ -169,11 +232,11 @@ Done:
 4. Projects + requests routers (full CRUD, ownership checks, `tech_stack`)
 5. Client shell — router, `AuthProvider`, `ProtectedRoute`, `Nav`
 6. Client pages — ProjectList, ProjectDetail, Dashboard, MyRequests
-7. Student profile fields + `/api/users/me/profile` routes (server only — no
-   client UI for editing a profile yet)
+7. Student profile fields + `/api/users/me/profile` routes
+8. S3 uploads — resume + profile picture, private bucket, presigned reads, and
+   the `/profile` page that drives them
 
 Next:
-8. S3 uploads (resumes, portfolio files, avatars)
 9. SES emails (request notifications)
 10. Deployment
 
