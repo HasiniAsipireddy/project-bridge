@@ -132,8 +132,12 @@ leave migration state inconsistent. **Never point migrate at the pooled URL.**
 ## Auth flow
 
 - Register/login hash or verify with bcrypt, then set a `token` cookie:
-  `httpOnly`, `sameSite: 'lax'`, `secure` in production, lifetime derived from
-  the JWT's own `exp` claim.
+  `httpOnly`, `secure` in production, lifetime derived from the JWT's own `exp`
+  claim. `sameSite` is `'lax'` in dev (Vite proxies `/api`, so the browser sees
+  one origin) and `'none'` in production, where the client and API may be on
+  separate hosts. `'none'` is only accepted alongside `secure`; both hang off
+  the same `isProduction` flag so they can't disagree. `clearAuthCookie` mirrors
+  the attributes exactly, or the browser keeps the original cookie.
 - JWT payload is **only** `{ sub, role }` — nothing that can go stale.
 - `cookieParser()` runs before the routers; without it `requireAuth` cannot read
   an httpOnly cookie.

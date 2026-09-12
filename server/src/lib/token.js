@@ -29,7 +29,10 @@ export function setAuthCookie(res, token) {
 
   res.cookie(AUTH_COOKIE, token, {
     httpOnly: true,
-    sameSite: 'lax',
+    // 'none' so the cookie survives a cross-origin deploy (client and API on
+    // separate hosts). Browsers only accept it alongside `secure`, which the
+    // same `isProduction` flag turns on — the two can't drift apart.
+    sameSite: isProduction ? 'none' : 'lax',
     secure: isProduction,
     maxAge: exp * 1000 - Date.now(),
     path: '/',
@@ -40,7 +43,7 @@ export function clearAuthCookie(res) {
   // Must mirror the attributes used above, or browsers keep the original cookie.
   res.clearCookie(AUTH_COOKIE, {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     secure: isProduction,
     path: '/',
   });
