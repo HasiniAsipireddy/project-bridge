@@ -14,10 +14,10 @@ requests; innovators accept or reject them.
 | Auth | JWT in an httpOnly cookie, bcrypt (cost 12) |
 | Validation | zod 4 (server-side, via `validateBody`) |
 | Uploads | multer (memory storage) → AWS S3, SDK v3 |
+| Email | AWS SES (`@aws-sdk/client-ses`), sandbox mode |
 | Lint | oxlint (client only) |
 
-Planned, not built: AWS SES (request notifications), deployment target
-undecided.
+Planned, not built: deployment target undecided.
 
 ## Dev commands
 
@@ -162,6 +162,36 @@ optional `S3_URL_EXPIRES_IN` — all read through `config/env.js`, all `required
 except the last, so a misconfigured bucket fails at boot rather than on first
 upload.
 
+## Email notifications (SES)
+
+The SES client lives in `server/src/lib/ses.js` (singleton `SESClient` +
+`sendEmail(to, subject, body)` over `SendEmailCommand`). The three message
+templates live in `server/src/lib/notifications.js`, so routers stay about HTTP
+and wording stays in one place. Env: `AWS_SES_FROM_EMAIL` (plus the shared
+`AWS_REGION` / credentials), `required()` at boot.
+
+Emails hang off the existing request lifecycle — there are no email endpoints:
+
+| Event | Recipient | Subject |
+|---|---|---|
+| `POST /api/projects/:id/requests` | project owner | New join request for "…" |
+| `PATCH /api/requests/:id` → `accepted` | the student | Your request to join "…" was accepted |
+| `PATCH /api/requests/:id` → `rejected` | the student | Update on your request to join "…" |
+
+**Sends are fire-and-forget.** `sendEmailInBackground` starts the send and
+returns immediately; the promise's `.catch` logs the failure. Nothing on a
+request path awaits SES, so a slow or failing send never delays the response,
+never changes the status code, and never surfaces to the user. The DB write
+always happens first — an email is a notification about something that already
+happened, so losing one is not a correctness problem.
+
+**Sandbox limitation:** the SES account is in sandbox mode, so mail is only
+delivered to **verified** addresses (and only from a verified `Source`).
+A send to an unverified recipient fails with `MessageRejected`, which shows up
+as a `SES send failed …` line in the server log while the API call itself still
+succeeds normally. Moving out of sandbox requires a production-access request in
+the SES console.
+
 ## Routing quirk
 
 `requestsRouter` is mounted at **`/api`**, not `/api/projects`, because its paths
@@ -207,7 +237,9 @@ Notes:
 - `middleware/` — `requireAuth`, `requireRole`, `validate` (`validateBody`), `errorHandler`
 - `lib/` — `prisma.js` (singleton client), `token.js` (sign/verify + cookie
   helpers), `s3.js` (singleton `S3Client`, `buildKey`, `putObject`,
-  `getPresignedUrl`)
+  `getPresignedUrl`), `ses.js` (singleton `SESClient`, `sendEmail`,
+  `sendEmailInBackground`), `notifications.js` (the request-lifecycle email
+  templates)
 - `config/env.js` — all env access; `required()` fails fast at boot
 - `app.js` builds the app, `index.js` listens and handles shutdown
 
@@ -235,9 +267,9 @@ Done:
 7. Student profile fields + `/api/users/me/profile` routes
 8. S3 uploads — resume + profile picture, private bucket, presigned reads, and
    the `/profile` page that drives them
+9. SES emails — new request / accepted / rejected, fire-and-forget
 
 Next:
-9. SES emails (request notifications)
 10. Deployment
 
 ## Not built yet (referenced in earlier drafts)

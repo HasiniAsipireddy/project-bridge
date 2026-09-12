@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
+import { notifyNewRequest, notifyRequestDecision } from '../lib/notifications.js';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireRole } from '../middleware/requireRole.js';
@@ -35,7 +36,11 @@ requestsRouter.post(
     try {
       // Checked up front so a missing project reads as 404 rather than
       // surfacing as an opaque foreign-key violation.
-      const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+      const project = await prisma.project.findUnique({
+        where: { id: req.params.id },
+        // The owner's address is needed for the notification below.
+        include: { owner: { select: { name: true, email: true } } },
+      });
 
       if (!project) {
         return res.status(404).json({ error: 'Project not found' });
@@ -47,6 +52,16 @@ requestsRouter.post(
           project_id: project.id,
           message: req.body.message ?? null,
         },
+        include: { student: studentSelect },
+      });
+
+      // Not awaited: the request is already created, and a slow or failing SES
+      // call must not delay or fail this response.
+      notifyNewRequest({
+        innovator: project.owner,
+        student: request.student,
+        project,
+        message: request.message,
       });
 
       return res.status(201).json({ request });
@@ -99,7 +114,11 @@ requestsRouter.patch(
     try {
       const existing = await prisma.request.findUnique({
         where: { id: req.params.id },
-        include: { project: { select: { owner_id: true } } },
+        include: {
+          project: {
+            select: { id: true, title: true, owner_id: true, owner: { select: { name: true } } },
+          },
+        },
       });
 
       if (!existing) {
@@ -116,6 +135,14 @@ requestsRouter.patch(
         where: { id: existing.id },
         data: { status: req.body.status },
         include: { student: studentSelect },
+      });
+
+      // Fire-and-forget, same as on creation: the decision is already saved.
+      notifyRequestDecision({
+        student: request.student,
+        innovator: existing.project.owner,
+        project: existing.project,
+        status: request.status,
       });
 
       return res.json({ request });

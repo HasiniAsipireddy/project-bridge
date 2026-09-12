@@ -21,6 +21,11 @@ export const env = {
     accessKeyId: required('AWS_ACCESS_KEY_ID'),
     secretAccessKey: required('AWS_SECRET_ACCESS_KEY'),
   },
+  ses: {
+    // Must be an address (or domain) verified in SES, otherwise every send is
+    // rejected. In sandbox mode the *recipient* must be verified too.
+    fromEmail: required('AWS_SES_FROM_EMAIL'),
+  },
   // Lifetime of the presigned GET URLs handed to the client, in seconds.
   s3UrlExpiresIn: Number(process.env.S3_URL_EXPIRES_IN ?? 3600),
 };
