@@ -1,6 +1,14 @@
-import { createApp } from './app.js';
-import { env } from './config/env.js';
-import { prisma } from './lib/prisma.js';
+// Secrets first, then everything else. The imports below are dynamic on
+// purpose: static ESM imports are evaluated before any statement in this file,
+// and config/env.js validates the moment it is imported — it has to see the
+// Secrets Manager values, not just what .env happened to provide.
+import { loadSecrets } from './lib/loadSecrets.js';
+
+await loadSecrets();
+
+const { createApp } = await import('./app.js');
+const { env } = await import('./config/env.js');
+const { prisma } = await import('./lib/prisma.js');
 
 const app = createApp();
 const server = app.listen(env.port, () => {

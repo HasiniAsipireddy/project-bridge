@@ -15,6 +15,7 @@ requests; innovators accept or reject them.
 | Validation | zod 4 (server-side, via `validateBody`) |
 | Uploads | multer (memory storage) → AWS S3, SDK v3 |
 | Email | AWS SES (`@aws-sdk/client-ses`), sandbox mode |
+| Secrets | AWS Secrets Manager, loaded at boot over `.env` |
 | Lint | oxlint (client only) |
 
 Planned, not built: deployment target undecided.
@@ -69,6 +70,44 @@ deleting a user clears their projects and requests.
 
 Migrations applied: `20260910025012_init`, `20260910155550_add_tech_stack`,
 `20260910185421_add_profile_fields`, `20260911110654_add_upload_keys`.
+
+## Secrets (AWS Secrets Manager)
+
+`server/src/lib/loadSecrets.js`, called from `index.js` **before anything else**.
+It fetches the secret with `GetSecretValueCommand`, parses its JSON key-value
+pairs, and writes each onto `process.env`, overriding `.env` for those keys.
+
+- Secret: **`project-bridge`** in `eu-north-1` (override with `AWS_SECRETS_ID`).
+- In the secret: `DATABASE_URL`, `DIRECT_URL`, `JWT_SECRET`,
+  `AWS_SECRET_ACCESS_KEY`.
+- Stays in plain `.env`: `AWS_REGION`, `AWS_ACCESS_KEY_ID` (they authenticate the
+  fetch itself), plus everything non-sensitive — `PORT`, `CLIENT_ORIGIN`,
+  `JWT_EXPIRES_IN`, `AWS_S3_BUCKET`, `S3_URL_EXPIRES_IN`, `AWS_SES_FROM_EMAIL`.
+- **Caveat:** `AWS_SECRET_ACCESS_KEY` is in both places. A bootstrap copy has to
+  be in `.env` (or come from an instance role) or the fetch can't be signed; the
+  secret's copy then overwrites it for runtime use. Deploying under an IAM role
+  is what actually removes the key from `.env`.
+
+**Fallback:** any failure — no AWS credentials, offline, missing secret, 5s
+timeout (`AWS_SECRETS_TIMEOUT_MS`) — logs
+`[secrets] could not load … Falling back to .env values.` and boots on the
+`.env` values. Local dev without AWS access still works. A successful load logs
+`[secrets] loaded N value(s) from "project-bridge": …` — **key names only, never
+values.**
+
+**Why the dynamic imports in `index.js`:** static ESM imports are evaluated
+before the module body, and `config/env.js` calls `required()` at import time.
+If `app.js` / `env.js` / `prisma.js` were imported statically they would
+validate — and Prisma would capture `DATABASE_URL` — before the loader had run.
+So `index.js` awaits `loadSecrets()` and then `await import(...)`s them. Keep it
+that way.
+
+`loadSecrets` deliberately does not import `config/env.js` (that would validate
+too early) and does not validate anything itself; `config/env.js` still owns
+what is required.
+
+**The Prisma CLI never runs this loader**, so `prisma migrate` reads `DIRECT_URL`
+straight from `.env`. Keep a working value there.
 
 ## Neon connection setup
 
@@ -239,9 +278,10 @@ Notes:
   helpers), `s3.js` (singleton `S3Client`, `buildKey`, `putObject`,
   `getPresignedUrl`), `ses.js` (singleton `SESClient`, `sendEmail`,
   `sendEmailInBackground`), `notifications.js` (the request-lifecycle email
-  templates)
+  templates), `loadSecrets.js` (Secrets Manager → `process.env`, runs first)
 - `config/env.js` — all env access; `required()` fails fast at boot
-- `app.js` builds the app, `index.js` listens and handles shutdown
+- `app.js` builds the app, `index.js` awaits `loadSecrets()` and only then
+  dynamically imports the app, listens, and handles shutdown
 
 **Client** (`client/src/`)
 - `pages/` — one per route
