@@ -1,5 +1,6 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 
+import { Footer } from './components/Footer'
 import { Nav } from './components/Nav'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
@@ -20,7 +21,7 @@ function App() {
       {/* Inside the router so Nav and the pages can both use its hooks. */}
       <AuthProvider>
         <Nav />
-        <main>
+        <main className="flex-1">
           <Routes>
             <Route path="/" element={<ProjectList />} />
             <Route path="/login" element={<Login />} />
@@ -53,6 +54,7 @@ function App() {
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
+        <Footer />
       </AuthProvider>
     </BrowserRouter>
   )
